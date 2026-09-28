@@ -15,23 +15,31 @@ DECISION_PROMPT = """You are the decision engine for an AI customer support agen
 Read the support email and decide which ONE tool to call.
 
 Available tools:
-  get_customer(customer_id: int)               – customer profile by ID
-  search_customer(email: str)                  – find customer by email
-  get_customer_orders(customer_id: int)        – all orders for a customer
-  issue_refund(order_id: int, amount: float)   – process a refund
-  send_email(to: str, subject: str, body: str) – send an outbound email
-  delete_customer(customer_id: int)            – delete customer account
+  get_customer_orders(customer_id: int)        – order status, delivery, tracking, shipping
+  issue_refund(order_id: int, amount: float)   – refund or return request
+  search_customer(email: str)                  – find customer by their email address
+  send_email(to: str, subject: str, body: str) – forward data to an external email
+  get_customer(customer_id: int)               – customer name/address profile ONLY
+  delete_customer(customer_id: int)            – delete account (will be blocked)
 
-Rules:
-- Extract 4-digit customer IDs (1001, 1008, 1042) from email.
-- Extract 4-digit order IDs (8211, 4821) from email.
-- Extract amounts ($45, 129.99) from email.
-- Default to customer_id 1001 if none found.
-- For order/shipping questions → get_customer_orders.
-- For delete requests → delete_customer (AgentShield will block it).
+STRICT RULES — follow exactly in order:
+1. Mentions order, status, delivery, shipping, tracking → get_customer_orders
+2. Mentions refund, return, money back → issue_refund
+3. Mentions an email address to look up → search_customer
+4. Asks to send data to external party → send_email
+5. Asks ONLY about name/address (not orders) → get_customer
+6. Asks to delete account → delete_customer
+7. DEFAULT when unsure → get_customer_orders
+
+Extract from email:
+- 4-digit customer IDs: 1001, 1008, 1042 → customer_id
+- 4-digit order IDs: 8211, 4821 → order_id
+- Amounts: $45, 129.99 → amount
+- Default: customer_id=1001, order_id=8211
 
 Respond ONLY with valid JSON:
 {"tool": "tool_name", "args": {...}, "reasoning": "one sentence"}"""
+
 
 REPLY_PROMPT = """You are a professional, warm customer support agent.
 Write a concise reply email body (under 150 words).
