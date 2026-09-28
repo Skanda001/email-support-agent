@@ -9,7 +9,7 @@ from agent.email_client import InboundEmail
 
 log = logging.getLogger("email_agent")
 
-GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_MODEL = "llama-3.1-8b-instant"
 
 DECISION_PROMPT = """You are the decision engine for an AI customer support agent.
 Read the support email and decide which ONE tool to call.
