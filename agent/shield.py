@@ -103,7 +103,7 @@ class ShieldClient:
         )
 
         try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with urllib.request.urlopen(req, timeout=60) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 self.token = data.get("access_token")
                 return self.token or ""
@@ -153,7 +153,7 @@ class ShieldClient:
         )
 
         try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with urllib.request.urlopen(req, timeout=60) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as err:
             err_body = err.read().decode("utf-8")
