@@ -190,7 +190,7 @@ def run_synthetic_email_mode() -> None:
     try:
         groq = Groq(api_key=groq_key)
         resp = groq.chat.completions.create(
-            model="gemma2-9b-it",
+            model="openai/gpt-oss-20b",
             messages=[
                 {
                     "role": "system",
