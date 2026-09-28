@@ -190,7 +190,7 @@ def run_synthetic_email_mode() -> None:
     try:
         groq = Groq(api_key=groq_key)
         resp = groq.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="gemma2-9b-it",
             messages=[
                 {
                     "role": "system",
