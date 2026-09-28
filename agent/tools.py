@@ -11,7 +11,7 @@ def search_customer(email: str) -> dict[str, Any]:
     return res or {"found": False, "email": email}
 
 
-@protect(tool="get_customer", resource_type="customer", data_classification="restricted")
+@protect(tool="get_customer", resource_type="customer", data_classification="internal")
 def get_customer(customer_id: int) -> dict[str, Any]:
     res = crm.get_customer(customer_id)
     return res or {"found": False, "customer_id": customer_id}
