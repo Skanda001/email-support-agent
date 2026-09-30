@@ -266,6 +266,119 @@ def _run_scenario_fallback() -> None:
         log.error("❌ Error: %s", exc)
 
 
+# ── HITL Closed Loop Execution ────────────────────────────────────────────────
+
+RESOLVED_STATE_FILE = os.path.join(os.path.dirname(__file__), ".resolved_approvals.json")
+
+
+def _load_resolved_approvals() -> set[str]:
+    try:
+        if os.path.exists(RESOLVED_STATE_FILE):
+            with open(RESOLVED_STATE_FILE, "r") as f:
+                return set(json.load(f))
+    except Exception:
+        pass
+    return set()
+
+
+def _save_resolved_approval(approval_id: str) -> None:
+    try:
+        resolved = _load_resolved_approvals()
+        resolved.add(approval_id)
+        with open(RESOLVED_STATE_FILE, "w") as f:
+            json.dump(list(resolved), f)
+    except Exception as e:
+        log.warning("Could not persist resolved approval state: %s", e)
+
+
+def process_approved_hitl_tasks() -> int:
+    """
+    Check AgentShield for approvals marked 'approved' by a human operator.
+    Re-executes the tool under supervisor authorization and sends a confirmation email.
+    """
+    from agent import shield as _s
+    from agent import tools
+    from agent.email_client import GmailClient
+
+    token = _s._default_client._ensure_token()
+    if not token:
+        return 0
+
+    base_url = AGENTSHIELD_URL or getattr(_s._default_client, "base_url", "https://agentshield-qhxo.onrender.com")
+    req = urllib.request.Request(
+        f"{base_url}/api/v1/approvals?status=approved&limit=10",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            approvals = json.loads(resp.read().decode())
+    except Exception as exc:
+        log.warning("Could not fetch approved tasks: %s", exc)
+        return 0
+
+    resolved_set = _load_resolved_approvals()
+    count = 0
+
+    tool_map = {
+        "get_customer": tools.get_customer,
+        "search_customer": tools.search_customer,
+        "get_customer_orders": tools.get_customer_orders,
+        "issue_refund": tools.issue_refund,
+        "send_email": tools.send_email,
+        "delete_customer": tools.delete_customer,
+    }
+
+    gmail = GmailClient(GMAIL_ADDRESS, GMAIL_APP_PASSWORD) if GMAIL_ADDRESS and GMAIL_APP_PASSWORD else None
+
+    for app in approvals:
+        app_id = str(app.get("id"))
+        if app_id in resolved_set:
+            continue
+
+        tool_name = app.get("tool")
+        ctx = app.get("request_context", {})
+        args = ctx.get("arguments", {})
+        decided_by = app.get("decided_by") or "supervisor"
+        note = app.get("decision_note") or "Approved via AgentShield"
+
+        fn = tool_map.get(tool_name)
+        if not fn:
+            _save_resolved_approval(app_id)
+            continue
+
+        log.info("⚡ Executing supervisor-approved task: %s (Approval ID: %s)", tool_name, app_id)
+        try:
+            call_kwargs = dict(args)
+            call_kwargs["_shield_approval_id"] = app_id
+            tool_result = fn(**call_kwargs)
+            log.info("✅ Approved task succeeded: %s", tool_result)
+
+            # Send email confirmation to customer if Gmail is configured
+            target_email = args.get("to") or args.get("email") or "skanda.dell@gmail.com"
+            if gmail and target_email:
+                subject = f"Update: Your request has been approved ({tool_name})"
+                body = (
+                    f"Dear Customer,\n\n"
+                    f"Good news! Your support request has been reviewed and approved by our supervisor ({decided_by}).\n\n"
+                    f"Supervisor Note: {note}\n"
+                    f"Execution Result:\n{json.dumps(tool_result, default=str, indent=2)}\n\n"
+                    f"Best regards,\nAgentShield Support Team\nPowered by AgentShield Zero-Trust Gateway"
+                )
+                try:
+                    gmail.send_reply(to=target_email, subject=subject, body=body)
+                    log.info("📧 Sent supervisor approval confirmation to %s", target_email)
+                except Exception as em_err:
+                    log.warning("Could not dispatch approval email: %s", em_err)
+
+            _save_resolved_approval(app_id)
+            count += 1
+        except Exception as e:
+            log.error("Failed to execute approved task %s: %s", app_id, e)
+            _save_resolved_approval(app_id)
+
+    return count
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -279,6 +392,11 @@ def main() -> None:
 
     api_key = resolve_api_key()
     patch_shield(api_key)
+
+    # 1. Closed loop: check for supervisor-approved HITL tasks and execute them
+    resolved_count = process_approved_hitl_tasks()
+    if resolved_count > 0:
+        log.info("🎉 Resolved %d supervisor-approved HITL tasks", resolved_count)
 
     if GMAIL_ADDRESS and GMAIL_APP_PASSWORD:
         processed = run_email_mode()

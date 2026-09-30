@@ -117,6 +117,7 @@ class ShieldClient:
         arguments: dict[str, Any],
         resource_type: Optional[str] = None,
         data_classification: Optional[str] = "internal",
+        approval_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """Send a tool execution intent to /api/v1/decide and get the gateway verdict."""
         # 1. Direct in-process execution (used when agent is plugged inside AgentShield backend)
@@ -127,6 +128,7 @@ class ShieldClient:
                     arguments=arguments,
                     resource_type=resource_type,
                     data_classification=data_classification,
+                    approval_id=approval_id,
                 )
             except Exception as e:
                 logger.error("Error in direct handler: %s", e)
@@ -141,6 +143,8 @@ class ShieldClient:
             "resource_type": resource_type or "unknown",
             "data_classification": data_classification or "internal",
         }
+        if approval_id:
+            payload["approval_id"] = approval_id
         req_data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
             url,
@@ -170,7 +174,13 @@ class ShieldClient:
             raise ShieldError(f"HTTP {err.code}: {detail}")
         except Exception as e:
             logger.error("Error communicating with AgentShield gateway: %s", e)
-            raise ShieldError(f"Network error contacting AgentShield gateway: {e}")
+            # FAIL-CLOSED: when the gateway is unreachable, block the tool call.
+            # A security gateway must never silently allow actions it cannot evaluate.
+            raise ShieldBlocked(
+                tool=tool,
+                risk_score=100.0,
+                reason=f"Gateway unavailable — fail-closed policy activated: {e}",
+            )
 
     def decide_approval(
         self,
@@ -259,17 +269,20 @@ def protect(
                         audit_id=decision_id,
                     )
 
-                return await fn(*args, **kwargs)
+                call_kwargs = dict(kwargs)
+                appr_id = call_kwargs.pop("_shield_approval_id", None)
+                reasoning = call_kwargs.pop("_reasoning", None)
 
-            return async_wrapper
-        else:
-            @functools.wraps(fn)
-            def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
-                res = _default_client.decide(
+                decide_args = dict(call_kwargs)
+                if reasoning:
+                    decide_args["_reasoning"] = str(reasoning)
+
+                res = await _default_client.decide(
                     tool=tool,
-                    arguments=kwargs,
+                    arguments=decide_args,
                     resource_type=resource_type,
                     data_classification=data_classification,
+                    approval_id=appr_id,
                 )
                 verdict = res.get("verdict")
                 risk_score = res.get("risk_score", 0)
@@ -295,7 +308,60 @@ def protect(
                         audit_id=decision_id,
                     )
 
-                return fn(*args, **kwargs)
+                # In-flight PII Masking: if gateway masked the arguments, invoke with safe masked data
+                if res.get("masked") and isinstance(res.get("masked_arguments"), dict):
+                    call_kwargs.update(res["masked_arguments"])
+
+                return await fn(*args, **call_kwargs)
+
+            return async_wrapper
+        else:
+            @functools.wraps(fn)
+            def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+                call_kwargs = dict(kwargs)
+                appr_id = call_kwargs.pop("_shield_approval_id", None)
+                reasoning = call_kwargs.pop("_reasoning", None)
+
+                decide_args = dict(call_kwargs)
+                if reasoning:
+                    decide_args["_reasoning"] = str(reasoning)
+
+                res = _default_client.decide(
+                    tool=tool,
+                    arguments=decide_args,
+                    resource_type=resource_type,
+                    data_classification=data_classification,
+                    approval_id=appr_id,
+                )
+                verdict = res.get("verdict")
+                risk_score = res.get("risk_score", 0)
+                reasons = res.get("reasons", [])
+                reason_str = ", ".join(reasons) if reasons else "Policy evaluation"
+                decision_id = str(res.get("decision_id", ""))
+
+                approval_id = str(res.get("approval_id") or decision_id)
+
+                if verdict in ("BLOCK",):
+                    raise ShieldBlocked(
+                        tool=tool,
+                        risk_score=risk_score,
+                        reason=reason_str,
+                        audit_id=decision_id,
+                    )
+                if verdict in ("HITL",):
+                    raise ShieldEscalated(
+                        tool=tool,
+                        risk_score=risk_score,
+                        reason=reason_str,
+                        approval_id=approval_id,
+                        audit_id=decision_id,
+                    )
+
+                # In-flight PII Masking: if gateway masked the arguments, invoke with safe masked data
+                if res.get("masked") and isinstance(res.get("masked_arguments"), dict):
+                    call_kwargs.update(res["masked_arguments"])
+
+                return fn(*args, **call_kwargs)
 
             return sync_wrapper
 

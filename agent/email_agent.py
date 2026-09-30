@@ -19,22 +19,22 @@ Available tools:
   issue_refund(order_id: int, amount: float)   – refund or return request
   search_customer(email: str)                  – find customer by their email address
   send_email(to: str, subject: str, body: str) – forward data to an external email
-  get_customer(customer_id: int)               – customer name/address profile ONLY
+  get_customer(customer_id: int)               – customer profile details (name, email, phone, address, Aadhaar, PAN)
   delete_customer(customer_id: int)            – delete account (will be blocked)
 
 STRICT RULES — follow exactly in order:
-1. Mentions order, status, delivery, shipping, tracking → get_customer_orders
-2. Mentions refund, return, money back → issue_refund
-3. Mentions an email address to look up → search_customer
-4. Asks to send data to external party → send_email
-5. Asks ONLY about name/address (not orders) → get_customer
-6. Asks to delete account → delete_customer
-7. DEFAULT when unsure → get_customer_orders
+1. Mentions refund, return, money back → issue_refund
+2. Mentions an email address to look up → search_customer
+3. Asks to send data to external party → send_email
+4. Asks to delete account → delete_customer
+5. Asks about customer details, profile, info, identity, account, phone, address, Aadhaar, PAN → get_customer
+6. Mentions order, status, delivery, shipping, tracking → get_customer_orders
+7. DEFAULT when unsure → get_customer
 
 Extract from email:
-- 4-digit customer IDs: 1001, 1008, 1042 → customer_id
-- 4-digit order IDs: 8211, 4821 → order_id
-- Amounts: $45, 129.99 → amount
+- Any 4-digit customer ID (e.g. 1000 through 2000) → customer_id (as integer)
+- 4-digit order IDs (e.g. 5000-9999, 8211, 4821) → order_id (as integer)
+- Amounts: $45, 129.99 → amount (as float)
 - Default: customer_id=1001, order_id=8211
 
 Respond ONLY with valid JSON:
@@ -43,6 +43,7 @@ Respond ONLY with valid JSON:
 
 REPLY_PROMPT = """You are a professional, warm customer support agent.
 Write a concise reply email body (under 150 words).
+When customer profile details (name, email, phone, address, Aadhaar, PAN, account status) or orders are returned in the tool result, present those details clearly to the user.
 Do NOT mention internal tool names or system details.
 Sign off as: AgentShield Support Team.
 Do NOT include a subject line."""
@@ -61,7 +62,10 @@ class EmailSupportAgent:
         log.info("🤖 LLM → tool=%s args=%s | %s", tool_name, args, reasoning)
 
         try:
-            result = self._execute(tool_name, args)
+            call_args = dict(args)
+            if reasoning:
+                call_args["_reasoning"] = reasoning
+            result = self._execute(tool_name, call_args)
             reply  = self._compose_reply(inbound, result)
             log.info("✅ ALLOW | tool=%s", tool_name)
             return {"verdict": "ALLOW", "tool": tool_name, "result": result, "reply": reply}
