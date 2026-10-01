@@ -239,36 +239,6 @@ def protect(
         if inspect.iscoroutinefunction(fn):
             @functools.wraps(fn)
             async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-                res = _default_client.decide(
-                    tool=tool,
-                    arguments=kwargs,
-                    resource_type=resource_type,
-                    data_classification=data_classification,
-                )
-                verdict = res.get("verdict")
-                risk_score = res.get("risk_score", 0)
-                reasons = res.get("reasons", [])
-                reason_str = ", ".join(reasons) if reasons else "Policy evaluation"
-                decision_id = str(res.get("decision_id", ""))
-
-                approval_id = str(res.get("approval_id") or decision_id)
-
-                if verdict in ("BLOCK",):
-                    raise ShieldBlocked(
-                        tool=tool,
-                        risk_score=risk_score,
-                        reason=reason_str,
-                        audit_id=decision_id,
-                    )
-                if verdict in ("ESCALATE", "HITL"):
-                    raise ShieldEscalated(
-                        tool=tool,
-                        risk_score=risk_score,
-                        reason=reason_str,
-                        approval_id=approval_id,
-                        audit_id=decision_id,
-                    )
-
                 call_kwargs = dict(kwargs)
                 appr_id = call_kwargs.pop("_shield_approval_id", None)
                 reasoning = call_kwargs.pop("_reasoning", None)
@@ -277,7 +247,7 @@ def protect(
                 if reasoning:
                     decide_args["_reasoning"] = str(reasoning)
 
-                res = await _default_client.decide(
+                res = _default_client.decide(
                     tool=tool,
                     arguments=decide_args,
                     resource_type=resource_type,
@@ -289,7 +259,6 @@ def protect(
                 reasons = res.get("reasons", [])
                 reason_str = ", ".join(reasons) if reasons else "Policy evaluation"
                 decision_id = str(res.get("decision_id", ""))
-
                 approval_id = str(res.get("approval_id") or decision_id)
 
                 if verdict in ("BLOCK",):

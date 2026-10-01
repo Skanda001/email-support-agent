@@ -92,7 +92,7 @@ class EmailSupportAgent:
                 model=GROQ_MODEL,
                 messages=[{"role": "system", "content": DECISION_PROMPT},
                           {"role": "user",   "content": msg}],
-                temperature=0.1, max_tokens=300,
+                temperature=0.1, max_tokens=1024,
                 response_format={"type": "json_object"},
             )
             d = json.loads(resp.choices[0].message.content)
@@ -128,7 +128,7 @@ class EmailSupportAgent:
                 model=GROQ_MODEL,
                 messages=[{"role": "system", "content": REPLY_PROMPT},
                           {"role": "user",   "content": prompt}],
-                temperature=0.7, max_tokens=300,
+                temperature=0.7, max_tokens=512,
             )
             return resp.choices[0].message.content.strip()
         except Exception:

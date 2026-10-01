@@ -204,7 +204,7 @@ def run_synthetic_email_mode() -> None:
             ],
             response_format={"type": "json_object"},
             temperature=0.85,
-            max_tokens=300,
+            max_tokens=1024,
         )
         data      = json.loads(resp.choices[0].message.content)
         subject   = data.get("subject", "Support request")
